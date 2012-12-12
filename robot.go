@@ -1,6 +1,7 @@
 package main
 import (
 	"fmt"
+	"time"
 	"bufio"
 	"os"
 	"strings"
@@ -67,6 +68,41 @@ func report_stat(output chan string, playeridstr string, srcStat string, dstStat
 	output<-playeridstr + " stat " + srcStat + " to " + dstStat
 }
 
+func Connect(io *IO) {
+	conn, err := net.Dial("tcp", "localhost:8090")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	readwriter := bufio.NewReadWriter(conn, conn)
+	go func(){
+		for {
+			msg, err := readwriter.ReadString('\n')
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+			io.input<-strings.TrimSpace(msg)
+		}
+	}()
+	go func(){
+		for {
+			select {
+				case msg := <-conn.output:
+					len, err := readwriter.WriteString(msg)
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+					err = readwriter.Flush()
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+			}
+		}
+	}()
+}
 /*
 	offline stat
 		shut
@@ -84,20 +120,35 @@ func start_robot(output chan string, playerid uint64) *Robot {
 
 	go func() {
 		nextStat := "offline"
+		chat := false
+		combat := false
+		timer := make(chan bool)
+		go func() {
+			time.Sleep(1 * time.Second)
+			timer<-true
+		}()
 		stat := "null"
-
+		conn := newIO(nil, nil)
 		FOR: for {
 			switch stat {
 				case "offline":
 					select {
 						case cmd := <-ioer.input:
-							args := strings.Split(strings.Trim(cmd, "\r\n\t "), " ")
+							args := strings.Split(strings.TrimSpace(cmd))
 							switch args[0] {
 								case "shut":
 									nextStat = "null"
 								case "logon":
+									Connect(conn)
+									conn.output<-CSLogon
+							}
+						case msg := <-conn.input:
+							args := strings.Split(strings.TrimSpace(msg))
+							switch args[0] {
+								case SCLogon:
 									nextStat = "online"
 							}
+						case <-timer:
 					}
 				case "online":
 					select {
@@ -107,9 +158,21 @@ func start_robot(output chan string, playerid uint64) *Robot {
 								case "shut":
 									nextStat = "null"
 								case "logoff":
+									conn.Close
 									nextStat = "offline"
 								case "chat":
+									chat = !chat 
 								case "combat":
+									combat = !combat
+							}
+						case msg := <-conn.input:
+							args := strings.Split(strings.TrimSpace(msg))
+							switch args[0] {
+							}
+						case <-timer:
+							if chat {
+							}
+							if combat {
 							}
 					}
 				case "null":
